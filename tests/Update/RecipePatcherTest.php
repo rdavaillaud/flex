@@ -308,6 +308,54 @@ class RecipePatcherTest extends TestCase
         $this->assertSame($expectedConflicts, $hadConflicts);
     }
 
+    #[DataProvider('provideApplyPatchCases')]
+    public function testApplyPatchInGitWorktree(array $filesCurrentlyInApp, RecipePatch $recipePatch, array $expectedFiles, bool $expectedConflicts)
+    {
+        $mainProjectPath = FLEX_TEST_DIR.'/main';
+        $worktreePath = FLEX_TEST_DIR.'/worktree';
+
+        @mkdir($mainProjectPath, 0777, true);
+
+        (new Process(['git', 'init', '--initial-branch=main'], $mainProjectPath))->mustRun();
+        (new Process(['git', 'config', 'user.name', 'Unit test'], $mainProjectPath))->mustRun();
+        (new Process(['git', 'config', 'user.email', ''], $mainProjectPath))->mustRun();
+        (new Process(['git', 'config', 'commit.gpgsign', 'false'], $mainProjectPath))->mustRun();
+
+        // an initial commit is required before creating a linked worktree
+        file_put_contents($mainProjectPath.'/.gitkeep', '');
+        (new Process(['git', 'add', '-A'], $mainProjectPath))->mustRun();
+        (new Process(['git', 'commit', '-m', 'initial'], $mainProjectPath))->mustRun();
+
+        (new Process(['git', 'worktree', 'add', '-b', 'recipe-update', $worktreePath], $mainProjectPath))->mustRun();
+
+        foreach ($filesCurrentlyInApp as $file => $contents) {
+            $path = $worktreePath.'/'.$file;
+            if (!file_exists(\dirname($path))) {
+                @mkdir(\dirname($path), 0777, true);
+            }
+            file_put_contents($path, $contents);
+        }
+        if (\count($filesCurrentlyInApp) > 0) {
+            (new Process(['git', 'add', '-A'], $worktreePath))->mustRun();
+            (new Process(['git', 'commit', '-m', 'Committing original files'], $worktreePath))->mustRun();
+        }
+
+        $patcher = new RecipePatcher($worktreePath, $this->createStub(IOInterface::class), $this->createStub(Lock::class));
+        $hadConflicts = !$patcher->applyPatch($recipePatch);
+
+        foreach ($expectedFiles as $file => $expectedContents) {
+            if (null === $expectedContents) {
+                $this->assertFileDoesNotExist($worktreePath.'/'.$file);
+
+                continue;
+            }
+            $this->assertFileExists($worktreePath.'/'.$file);
+            $this->assertSame($expectedContents, file_get_contents($worktreePath.'/'.$file));
+        }
+
+        $this->assertSame($expectedConflicts, $hadConflicts);
+    }
+
     public static function provideApplyPatchOnSubfolderCases(): iterable
     {
         yield from self::getApplyPatchTests('ProjectA/');

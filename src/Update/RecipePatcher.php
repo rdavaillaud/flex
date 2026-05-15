@@ -224,7 +224,14 @@ class RecipePatcher
 
     private function getBlobPath(string $gitRoot, string $hash): string
     {
-        $gitDir = trim($this->execute('git rev-parse --absolute-git-dir', $gitRoot));
+        // --git-common-dir is the shared objects location, so blobs written here are
+        // resolvable both from a regular checkout and from a linked git worktree
+        // (where --absolute-git-dir would point to .git/worktrees/<name>, which has
+        // no objects/ directory of its own).
+        $gitDir = trim($this->execute('git rev-parse --git-common-dir', $gitRoot));
+        if (!$this->filesystem->isAbsolutePath($gitDir)) {
+            $gitDir = $gitRoot.'/'.$gitDir;
+        }
 
         $hashStart = substr($hash, 0, 2);
         $hashEnd = substr($hash, 2);
